@@ -1,0 +1,674 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Survive the Night</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: #000;
+            font-family: 'Courier New', monospace;
+        }
+        #gameCanvas {
+            display: block;
+            width: 100%;
+            height: 100vh;
+        }
+        #ui {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            color: #fff;
+            font-size: 18px;
+            text-shadow: 2px 2px 4px #000;
+            z-index: 10;
+            pointer-events: none;
+        }
+        #ammo {
+            color: #ffeb3b;
+        }
+        #timer {
+            color: #4caf50;
+            font-size: 24px;
+            font-weight: bold;
+        }
+        #health {
+            color: #ff5252;
+            font-size: 20px;
+        }
+        #crosshair {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 20px;
+            height: 20px;
+            border: 2px solid #fff;
+            border-radius: 50%;
+            pointer-events: none;
+            z-index: 5;
+        }
+        #instructions {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0,0,0,0.95);
+            padding: 40px;
+            border: 3px solid #ff5252;
+            color: #fff;
+            text-align: center;
+            z-index: 100;
+            max-width: 600px;
+        }
+        #startBtn {
+            margin-top: 20px;
+            padding: 15px 40px;
+            font-size: 20px;
+            background: #ff5252;
+            color: #fff;
+            border: none;
+            cursor: pointer;
+            font-family: 'Courier New', monospace;
+            transition: all 0.3s;
+        }
+        #startBtn:hover {
+            background: #ff1744;
+            transform: scale(1.05);
+        }
+        #gameOver {
+            display: none;
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0,0,0,0.95);
+            padding: 40px;
+            border: 3px solid #ff5252;
+            color: #fff;
+            text-align: center;
+            z-index: 100;
+        }
+        #jumpscare {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: #ff0000;
+            z-index: 200;
+            justify-content: center;
+            align-items: center;
+        }
+        .scary-text {
+            font-size: 100px;
+            color: #000;
+            font-weight: bold;
+            animation: glitch 0.1s infinite;
+        }
+        @keyframes glitch {
+            0%, 100% { transform: translate(0) scale(1); }
+            25% { transform: translate(-10px, 10px) scale(1.1); }
+            50% { transform: translate(10px, -10px) scale(0.9); }
+            75% { transform: translate(-10px, -10px) scale(1.05); }
+        }
+        #muzzleFlash {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(255, 200, 0, 0.3);
+            pointer-events: none;
+            z-index: 3;
+        }
+    </style>
+</head>
+<body>
+<div id="crosshair"></div>
+<div id="muzzleFlash"></div>
+
+<div id="ui">
+    <div id="timer">Time Until Dawn: 03:00</div>
+    <div id="health">Health: 100%</div>
+    <div id="ammo">Ammo: ∞</div>
+    <div>Monsters Alive: <span id="monsterCount">0</span></div>
+    <div style="margin-top: 10px; font-size: 14px;">
+        WASD: Move | Mouse: Look | Left Click: Shoot | Space: Jump
+    </div>
+</div>
+
+<div id="instructions">
+    <h1 style="color: #ff5252; margin: 0;">SURVIVE THE NIGHT</h1>
+    <p style="margin-top: 20px; font-size: 18px;">Shoot them before they get you.</p>
+    <p>Click to shoot - aim carefully!</p>
+    <p>Monsters will chase you</p>
+    <p>They spawn randomly - even right in front of you!</p>
+    <p>Survive for 3 minutes until sunrise</p>
+    <button id="startBtn">START GAME</button>
+</div>
+
+<div id="gameOver">
+    <h1 id="gameOverText" style="color: #ff5252;">GAME OVER</h1>
+    <p id="gameOverMessage"></p>
+    <p id="killCount" style="font-size: 24px; margin: 20px 0;"></p>
+    <button id="restartBtn" style="padding: 10px 30px; font-size: 18px; background: #ff5252; color: #fff; border: none; cursor: pointer; font-family: 'Courier New', monospace;">Try Again</button>
+</div>
+
+<div id="jumpscare">
+    <div class="scary-text">YOU DIED</div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+    let scene, camera, renderer;
+    let player = {
+        x: 0,
+        y: 1.6,
+        z: 0,
+        velocityY: 0,
+        isJumping: false,
+        health: 100
+    };
+    let cameraRotation = { x: 0, y: 0 }; // Separate camera rotation
+    let keys = {};
+    let gameStarted = false;
+    let gameTime = 0;
+    let monsters = [];
+    let gun;
+    let raycaster = new THREE.Raycaster();
+    let totalKills = 0;
+
+    const SURVIVAL_TIME = 180;
+    const INITIAL_MONSTERS = 3;
+    const MAX_MONSTERS = 8;
+    const MONSTER_HEALTH = 100;
+    const MONSTER_SPEED = 0.05;
+    const MONSTER_DAMAGE = 2;
+    const MONSTER_ATTACK_RANGE = 3;
+    const SHOT_DAMAGE = 25;
+    const SPAWN_INTERVAL = 12;
+    const JUMP_FORCE = 0.15;
+    const GRAVITY = 0.008;
+
+    let lastSpawnTime = 0;
+
+    // Monster types
+    const MONSTER_TYPES = [
+        { name: 'Pennywise', color: 0xff0000, height: 2, width: 1 },
+        { name: 'Granny', color: 0x808080, height: 1.7, width: 0.9 },
+        { name: 'Slenderman', color: 0x000000, height: 2.5, width: 0.8 },
+        { name: 'Creeper', color: 0x00ff00, height: 1.8, width: 0.7 }
+    ];
+
+    function init() {
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x0a0a15);
+        scene.fog = new THREE.Fog(0x0a0a15, 10, 50);
+
+        camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(player.x, player.y, player.z);
+
+        renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        document.body.appendChild(renderer.domElement);
+
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0x1a1a3a, 0.4);
+        scene.add(ambientLight);
+
+        const moonLight = new THREE.DirectionalLight(0x6666ff, 0.5);
+        moonLight.position.set(20, 30, 10);
+        moonLight.castShadow = true;
+        moonLight.shadow.camera.left = -50;
+        moonLight.shadow.camera.right = 50;
+        moonLight.shadow.camera.top = 50;
+        moonLight.shadow.camera.bottom = -50;
+        scene.add(moonLight);
+
+        // Ground
+        const groundGeo = new THREE.PlaneGeometry(200, 200);
+        const groundMat = new THREE.MeshStandardMaterial({
+            color: 0x1a3a1a,
+            roughness: 0.8
+        });
+        const ground = new THREE.Mesh(groundGeo, groundMat);
+        ground.rotation.x = -Math.PI / 2;
+        ground.receiveShadow = true;
+        scene.add(ground);
+
+        createEnvironment();
+        createGun();
+
+        // Event listeners
+        document.addEventListener('keydown', (e) => {
+            keys[e.key.toLowerCase()] = true;
+            if (e.code === 'Space' && gameStarted && !player.isJumping) {
+                player.velocityY = JUMP_FORCE;
+                player.isJumping = true;
+            }
+        });
+
+        document.addEventListener('keyup', (e) => {
+            keys[e.key.toLowerCase()] = false;
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (gameStarted && document.pointerLockElement) {
+                cameraRotation.y -= e.movementX * 0.002;
+                cameraRotation.x -= e.movementY * 0.002;
+                cameraRotation.x = Math.max(-Math.PI/2.5, Math.min(Math.PI/2.5, cameraRotation.x));
+            }
+        });
+
+        document.addEventListener('click', () => {
+            if (gameStarted && document.pointerLockElement) {
+                shoot();
+            }
+        });
+
+        document.getElementById('startBtn').addEventListener('click', startGame);
+        document.getElementById('restartBtn').addEventListener('click', () => {
+            location.reload();
+        });
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        animate();
+    }
+
+    function createEnvironment() {
+        for (let i = 0; i < 40; i++) {
+            const trunk = new THREE.Mesh(
+                new THREE.CylinderGeometry(0.5, 0.5, 8, 8),
+                new THREE.MeshStandardMaterial({ color: 0x4a2511 })
+            );
+
+            const angle = Math.random() * Math.PI * 2;
+            const dist = Math.random() * 60 + 15;
+            trunk.position.set(
+                Math.cos(angle) * dist,
+                4,
+                Math.sin(angle) * dist
+            );
+            trunk.castShadow = true;
+            trunk.receiveShadow = true;
+            scene.add(trunk);
+
+            const leaves = new THREE.Mesh(
+                new THREE.SphereGeometry(3, 8, 8),
+                new THREE.MeshStandardMaterial({ color: 0x1a3a1a })
+            );
+            leaves.position.copy(trunk.position);
+            leaves.position.y = 9;
+            leaves.castShadow = true;
+            scene.add(leaves);
+        }
+
+        for (let i = 0; i < 20; i++) {
+            const rock = new THREE.Mesh(
+                new THREE.SphereGeometry(Math.random() * 1.5 + 0.5, 6, 6),
+                new THREE.MeshStandardMaterial({ color: 0x4a4a4a })
+            );
+            const angle = Math.random() * Math.PI * 2;
+            const dist = Math.random() * 50 + 10;
+            rock.position.set(
+                Math.cos(angle) * dist,
+                0.5,
+                Math.sin(angle) * dist
+            );
+            rock.castShadow = true;
+            rock.receiveShadow = true;
+            scene.add(rock);
+        }
+    }
+
+    function createGun() {
+        gun = new THREE.Group();
+
+        const barrel = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.05, 0.05, 0.8, 8),
+            new THREE.MeshStandardMaterial({ color: 0x2a2a2a })
+        );
+        barrel.rotation.x = Math.PI / 2;
+        barrel.position.z = -0.4;
+        gun.add(barrel);
+
+        const handle = new THREE.Mesh(
+            new THREE.BoxGeometry(0.1, 0.3, 0.1),
+            new THREE.MeshStandardMaterial({ color: 0x4a2511 })
+        );
+        handle.position.set(0, -0.15, 0.1);
+        gun.add(handle);
+
+        const trigger = new THREE.Mesh(
+            new THREE.BoxGeometry(0.05, 0.1, 0.1),
+            new THREE.MeshStandardMaterial({ color: 0x1a1a1a })
+        );
+        trigger.position.set(0, -0.1, 0);
+        gun.add(trigger);
+
+        gun.position.set(0.3, -0.3, -0.5);
+        camera.add(gun);
+        scene.add(camera);
+    }
+
+    function createMonster(type) {
+        const monsterGroup = new THREE.Group();
+
+        // Body (taller humanoid shape)
+        const bodyGeo = new THREE.BoxGeometry(type.width, type.height, type.width * 0.6);
+        const bodyMat = new THREE.MeshStandardMaterial({
+            color: type.color,
+            roughness: 0.7
+        });
+        const body = new THREE.Mesh(bodyGeo, bodyMat);
+        body.position.y = type.height / 2;
+        body.castShadow = true;
+        monsterGroup.add(body);
+
+        // Head
+        const headSize = type.width * 0.5;
+        const head = new THREE.Mesh(
+            new THREE.BoxGeometry(headSize, headSize * 1.2, headSize),
+            new THREE.MeshStandardMaterial({
+                color: type.name === 'Pennywise' ? 0xffffff : type.color,
+                roughness: 0.8
+            })
+        );
+        head.position.y = type.height + headSize * 0.6;
+        head.castShadow = true;
+        monsterGroup.add(head);
+
+        // Eyes (glowing)
+        const eyeGeo = new THREE.SphereGeometry(0.08, 8, 8);
+        const eyeMat = new THREE.MeshStandardMaterial({
+            color: type.name === 'Pennywise' ? 0xff0000 : 0xffff00,
+            emissive: type.name === 'Pennywise' ? 0xff0000 : 0xffff00,
+            emissiveIntensity: 2
+        });
+
+        const leftEye = new THREE.Mesh(eyeGeo, eyeMat);
+        leftEye.position.set(-headSize * 0.3, type.height + headSize * 0.7, headSize * 0.5);
+        monsterGroup.add(leftEye);
+
+        const rightEye = new THREE.Mesh(eyeGeo, eyeMat);
+        rightEye.position.set(headSize * 0.3, type.height + headSize * 0.7, headSize * 0.5);
+        monsterGroup.add(rightEye);
+
+        // Arms
+        const armGeo = new THREE.BoxGeometry(type.width * 0.2, type.height * 0.6, type.width * 0.2);
+        const armMat = new THREE.MeshStandardMaterial({ color: type.color });
+
+        const leftArm = new THREE.Mesh(armGeo, armMat);
+        leftArm.position.set(-type.width * 0.6, type.height * 0.5, 0);
+        leftArm.castShadow = true;
+        monsterGroup.add(leftArm);
+
+        const rightArm = new THREE.Mesh(armGeo, armMat);
+        rightArm.position.set(type.width * 0.6, type.height * 0.5, 0);
+        rightArm.castShadow = true;
+        monsterGroup.add(rightArm);
+
+        // Ominous glow
+        const light = new THREE.PointLight(type.color, 1.5, 10);
+        light.position.y = type.height / 2;
+        monsterGroup.add(light);
+
+        return monsterGroup;
+    }
+
+    function spawnMonster() {
+        if (monsters.length >= MAX_MONSTERS) return;
+
+        const type = MONSTER_TYPES[Math.floor(Math.random() * MONSTER_TYPES.length)];
+        const monsterGroup = createMonster(type);
+
+        // 30% chance to spawn close for jumpscare
+        let dist;
+        if (Math.random() < 0.3) {
+            dist = 5 + Math.random() * 5; // Very close spawn!
+        } else {
+            dist = 20 + Math.random() * 30; // Normal spawn
+        }
+
+        const angle = Math.random() * Math.PI * 2;
+        monsterGroup.position.set(
+            player.x + Math.cos(angle) * dist,
+            0,
+            player.z + Math.sin(angle) * dist
+        );
+
+        monsterGroup.userData = {
+            health: MONSTER_HEALTH,
+            maxHealth: MONSTER_HEALTH,
+            type: type.name,
+            armSwing: 0
+        };
+
+        scene.add(monsterGroup);
+        monsters.push(monsterGroup);
+    }
+
+    function startGame() {
+        gameStarted = true;
+        document.getElementById('instructions').style.display = 'none';
+        document.body.requestPointerLock();
+
+        for (let i = 0; i < INITIAL_MONSTERS; i++) {
+            spawnMonster();
+        }
+    }
+
+    function shoot() {
+        const flash = document.getElementById('muzzleFlash');
+        flash.style.display = 'block';
+        setTimeout(() => flash.style.display = 'none', 50);
+
+        gun.position.z += 0.1;
+        setTimeout(() => gun.position.z = -0.5, 100);
+
+        raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+
+        const monsterMeshes = [];
+        monsters.forEach(m => {
+            m.children.forEach(child => {
+                if (child instanceof THREE.Mesh) {
+                    monsterMeshes.push(child);
+                }
+            });
+        });
+
+        const intersects = raycaster.intersectObjects(monsterMeshes);
+
+        if (intersects.length > 0) {
+            const hitMesh = intersects[0].object;
+            const monster = hitMesh.parent;
+
+            if (monster.userData.health !== undefined) {
+                monster.userData.health -= SHOT_DAMAGE;
+
+                hitMesh.material.emissiveIntensity = 2;
+                setTimeout(() => {
+                    if (hitMesh.material) hitMesh.material.emissiveIntensity = 0.5;
+                }, 100);
+
+                if (monster.userData.health <= 0) {
+                    killMonster(monster);
+                }
+            }
+        }
+    }
+
+    function killMonster(monster) {
+        let scale = 1;
+        const shrink = setInterval(() => {
+            scale -= 0.1;
+            monster.scale.set(scale, scale, scale);
+            if (scale <= 0) {
+                clearInterval(shrink);
+                scene.remove(monster);
+                monsters = monsters.filter(m => m !== monster);
+            }
+        }, 50);
+
+        totalKills++;
+    }
+
+    function updatePlayer() {
+        const speed = 0.1;
+
+        // Calculate movement direction based on camera Y rotation only
+        const moveForward = new THREE.Vector3();
+        const moveRight = new THREE.Vector3();
+
+        moveForward.x = Math.sin(cameraRotation.y);
+        moveForward.z = Math.cos(cameraRotation.y);
+        moveForward.normalize();
+
+        moveRight.x = Math.sin(cameraRotation.y + Math.PI / 2);
+        moveRight.z = Math.cos(cameraRotation.y + Math.PI / 2);
+        moveRight.normalize();
+
+        if (keys['w']) {
+            player.x += moveForward.x * speed;
+            player.z += moveForward.z * speed;
+        }
+        if (keys['s']) {
+            player.x -= moveForward.x * speed;
+            player.z -= moveForward.z * speed;
+        }
+        if (keys['a']) {
+            player.x += moveRight.x * speed;
+            player.z += moveRight.z * speed;
+        }
+        if (keys['d']) {
+            player.x -= moveRight.x * speed;
+            player.z -= moveRight.z * speed;
+        }
+
+        // Jumping physics
+        player.velocityY -= GRAVITY;
+        player.y += player.velocityY;
+
+        if (player.y <= 1.6) {
+            player.y = 1.6;
+            player.velocityY = 0;
+            player.isJumping = false;
+        }
+
+        // Update camera position and rotation separately
+        camera.position.set(player.x, player.y, player.z);
+        camera.rotation.y = cameraRotation.y;
+        camera.rotation.x = cameraRotation.x;
+        camera.rotation.z = 0; // Keep camera level
+    }
+
+    function updateMonsters() {
+        monsters.forEach(monster => {
+            const dx = player.x - monster.position.x;
+            const dz = player.z - monster.position.z;
+            const dist = Math.sqrt(dx * dx + dz * dz);
+
+            monster.position.x += (dx / dist) * MONSTER_SPEED;
+            monster.position.z += (dz / dist) * MONSTER_SPEED;
+
+            // Swing arms while moving
+            monster.userData.armSwing += 0.1;
+            if (monster.children[3]) { // Left arm
+                monster.children[3].rotation.x = Math.sin(monster.userData.armSwing) * 0.5;
+            }
+            if (monster.children[4]) { // Right arm
+                monster.children[4].rotation.x = Math.sin(monster.userData.armSwing + Math.PI) * 0.5;
+            }
+
+            monster.lookAt(player.x, monster.position.y, player.z);
+
+            if (dist < MONSTER_ATTACK_RANGE) {
+                player.health -= MONSTER_DAMAGE * 0.016;
+                if (player.health <= 0) {
+                    endGame(false);
+                }
+            }
+        });
+
+        document.getElementById('monsterCount').textContent = monsters.length;
+    }
+
+    function endGame(survived) {
+        gameStarted = false;
+        document.exitPointerLock();
+
+        if (!survived) {
+            document.getElementById('jumpscare').style.display = 'flex';
+            setTimeout(() => {
+                document.getElementById('jumpscare').style.display = 'none';
+                showGameOver(false);
+            }, 1500);
+        } else {
+            showGameOver(true);
+        }
+    }
+
+    function showGameOver(won) {
+        const gameOverDiv = document.getElementById('gameOver');
+        const gameOverText = document.getElementById('gameOverText');
+        const gameOverMsg = document.getElementById('gameOverMessage');
+        const killCountDiv = document.getElementById('killCount');
+
+        if (won) {
+            gameOverText.textContent = 'YOU SURVIVED!';
+            gameOverText.style.color = '#4caf50';
+            gameOverMsg.textContent = 'The sun rises. You made it through the night!';
+        } else {
+            gameOverText.textContent = 'YOU DIED';
+            gameOverText.style.color = '#ff5252';
+            gameOverMsg.textContent = 'The monsters overwhelmed you...';
+        }
+
+        killCountDiv.textContent = `Monsters Killed: ${totalKills}`;
+        gameOverDiv.style.display = 'block';
+    }
+
+    function animate() {
+        requestAnimationFrame(animate);
+
+        if (gameStarted) {
+            gameTime += 1/60;
+            updatePlayer();
+            updateMonsters();
+
+            if (gameTime - lastSpawnTime > SPAWN_INTERVAL) {
+                spawnMonster();
+                lastSpawnTime = gameTime;
+            }
+
+            const timeLeft = SURVIVAL_TIME - gameTime;
+            const minutes = Math.floor(timeLeft / 60);
+            const seconds = Math.floor(timeLeft % 60);
+            document.getElementById('timer').textContent =
+                `Time Until Dawn: ${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+            document.getElementById('health').textContent =
+                `Health: ${Math.max(0, Math.floor(player.health))}%`;
+
+            if (gameTime >= SURVIVAL_TIME) {
+                endGame(true);
+            }
+        }
+
+        renderer.render(scene, camera);
+    }
+
+    init();
+</script>
+</body>
+</html>
