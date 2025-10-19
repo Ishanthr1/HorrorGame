@@ -11,11 +11,6 @@
             background: #000;
             font-family: 'Courier New', monospace;
         }
-        #gameCanvas {
-            display: block;
-            width: 100%;
-            height: 100vh;
-        }
         #ui {
             position: fixed;
             top: 20px;
@@ -25,9 +20,6 @@
             text-shadow: 2px 2px 4px #000;
             z-index: 10;
             pointer-events: none;
-        }
-        #ammo {
-            color: #ffeb3b;
         }
         #timer {
             color: #4caf50;
@@ -126,9 +118,32 @@
             pointer-events: none;
             z-index: 3;
         }
+        #loadingScreen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: #000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+            flex-direction: column;
+        }
+        #loadingText {
+            color: #fff;
+            font-size: 24px;
+            margin-top: 20px;
+        }
     </style>
 </head>
 <body>
+<div id="loadingScreen">
+    <div style="color: #ff5252; font-size: 36px;">LOADING MONSTERS...</div>
+    <div id="loadingText">0%</div>
+</div>
+
 <div id="crosshair"></div>
 <div id="muzzleFlash"></div>
 
@@ -144,11 +159,11 @@
 
 <div id="instructions">
     <h1 style="color: #ff5252; margin: 0;">SURVIVE THE NIGHT</h1>
-    <p style="margin-top: 20px; font-size: 18px;">Shoot them before they get you.</p>
-    <p>Click to shoot - aim carefully!</p>
-    <p>Monsters will chase you</p>
-    <p>They spawn randomly - even right in front of you!</p>
-    <p>Survive for 3 minutes until sunrise</p>
+    <p style="margin-top: 20px; font-size: 18px;">Horror movie villains are hunting you. Shoot them before they get you.</p>
+    <p>🔫 Click to shoot - aim carefully!</p>
+    <p>👹 Realistic 3D monsters will chase you</p>
+    <p>💀 They spawn randomly - even right in front of you!</p>
+    <p>⏰ Survive for 3 minutes until sunrise</p>
     <button id="startBtn">START GAME</button>
 </div>
 
@@ -165,6 +180,35 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
+    const MONSTER_MODELS = {
+        pennywise: {
+            url: 'https://raw.githubusercontent.com/Ishanthr1/HorrorGame/dark_deception_clown_gremlins.glb',
+            scale: 1,
+            name: 'Pennywise'
+        },
+        granny: {
+            url: 'https://raw.githubusercontent.com/Ishanthr1/HorrorGame/granny_animated_fbx.glb',
+            scale: 1,
+            name: 'Granny'
+        },
+        slenderman: {
+            url: 'https://raw.githubusercontent.com/Ishanthr1/HorrorGame/slenderman.glb',
+            scale: 1,
+            name: 'Slenderman'
+        },
+        zombie: {
+            url: 'https://raw.githubusercontent.com/Ishanthr1/HorrorGame/swordtember_2023_zombie_sword.glb',
+            scale: 1,
+            name: 'Zombie'
+        }
+    };
+
+    // GLTFLoader setup
+    let GLTFLoader;
+    const loadedModels = {};
+    let modelsLoaded = false;
+
+    // Game variables
     let scene, camera, renderer;
     let player = {
         x: 0,
@@ -174,7 +218,7 @@
         isJumping: false,
         health: 100
     };
-    let cameraRotation = { x: 0, y: 0 }; // Separate camera rotation
+    let cameraRotation = { x: 0, y: 0 };
     let keys = {};
     let gameStarted = false;
     let gameTime = 0;
@@ -197,13 +241,78 @@
 
     let lastSpawnTime = 0;
 
-    // Monster types
-    const MONSTER_TYPES = [
-        { name: 'Pennywise', color: 0xff0000, height: 2, width: 1 },
-        { name: 'Granny', color: 0x808080, height: 1.7, width: 0.9 },
-        { name: 'Slenderman', color: 0x000000, height: 2.5, width: 0.8 },
-        { name: 'Creeper', color: 0x00ff00, height: 1.8, width: 0.7 }
-    ];
+    // Load GLTFLoader
+    function loadGLTFLoader() {
+        return new Promise((resolve) => {
+            const script = document.createElement('script');
+            script.src = 'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js';
+            script.onload = () => {
+                GLTFLoader = THREE.GLTFLoader;
+                resolve();
+            };
+            document.head.appendChild(script);
+        });
+    }
+
+    // Load all 3D models
+    async function loadModels() {
+        await loadGLTFLoader();
+        const loader = new GLTFLoader();
+
+        const modelKeys = Object.keys(MONSTER_MODELS);
+        let loadedCount = 0;
+
+        for (const key of modelKeys) {
+            try {
+                const model = await new Promise((resolve, reject) => {
+                    loader.load(
+                        MONSTER_MODELS[key].url,
+                        (gltf) => resolve(gltf),
+                        (progress) => {
+                            const percent = Math.round((progress.loaded / progress.total) * 100);
+                            document.getElementById('loadingText').textContent =
+                                `Loading ${MONSTER_MODELS[key].name}... ${percent}%`;
+                        },
+                        (error) => reject(error)
+                    );
+                });
+
+                loadedModels[key] = model.scene;
+                loadedCount++;
+
+                const totalPercent = Math.round((loadedCount / modelKeys.length) * 100);
+                document.getElementById('loadingText').textContent = `${totalPercent}% Complete`;
+
+            } catch (error) {
+                console.warn(`Failed to load ${key}:`, error);
+                // Create fallback geometric model if loading fails
+                loadedModels[key] = createFallbackMonster(key);
+            }
+        }
+
+        modelsLoaded = true;
+        document.getElementById('loadingScreen').style.display = 'none';
+    }
+
+    // Fallback monster if model doesn't load
+    function createFallbackMonster(type) {
+        const group = new THREE.Group();
+        const body = new THREE.Mesh(
+            new THREE.BoxGeometry(0.8, 1.8, 0.5),
+            new THREE.MeshStandardMaterial({ color: 0xff0000 })
+        );
+        body.position.y = 0.9;
+        group.add(body);
+
+        const head = new THREE.Mesh(
+            new THREE.SphereGeometry(0.3),
+            new THREE.MeshStandardMaterial({ color: 0xffffff })
+        );
+        head.position.y = 2;
+        group.add(head);
+
+        return group;
+    }
 
     function init() {
         scene = new THREE.Scene();
@@ -218,20 +327,14 @@
         renderer.shadowMap.enabled = true;
         document.body.appendChild(renderer.domElement);
 
-        // Lighting
         const ambientLight = new THREE.AmbientLight(0x1a1a3a, 0.4);
         scene.add(ambientLight);
 
         const moonLight = new THREE.DirectionalLight(0x6666ff, 0.5);
         moonLight.position.set(20, 30, 10);
         moonLight.castShadow = true;
-        moonLight.shadow.camera.left = -50;
-        moonLight.shadow.camera.right = 50;
-        moonLight.shadow.camera.top = 50;
-        moonLight.shadow.camera.bottom = -50;
         scene.add(moonLight);
 
-        // Ground
         const groundGeo = new THREE.PlaneGeometry(200, 200);
         const groundMat = new THREE.MeshStandardMaterial({
             color: 0x1a3a1a,
@@ -244,8 +347,108 @@
 
         createEnvironment();
         createGun();
+        setupEventListeners();
 
-        // Event listeners
+        // Load models then start
+        loadModels();
+
+        animate();
+    }
+
+    function createEnvironment() {
+        for (let i = 0; i < 40; i++) {
+            const trunk = new THREE.Mesh(
+                new THREE.CylinderGeometry(0.5, 0.5, 8, 8),
+                new THREE.MeshStandardMaterial({ color: 0x4a2511 })
+            );
+
+            const angle = Math.random() * Math.PI * 2;
+            const dist = Math.random() * 60 + 15;
+            trunk.position.set(Math.cos(angle) * dist, 4, Math.sin(angle) * dist);
+            trunk.castShadow = true;
+            scene.add(trunk);
+
+            const leaves = new THREE.Mesh(
+                new THREE.SphereGeometry(3, 8, 8),
+                new THREE.MeshStandardMaterial({ color: 0x1a3a1a })
+            );
+            leaves.position.copy(trunk.position);
+            leaves.position.y = 9;
+            scene.add(leaves);
+        }
+    }
+
+    function createGun() {
+        gun = new THREE.Group();
+
+        const barrel = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.05, 0.05, 0.8, 8),
+            new THREE.MeshStandardMaterial({ color: 0x2a2a2a })
+        );
+        barrel.rotation.x = Math.PI / 2;
+        barrel.position.z = -0.4;
+        gun.add(barrel);
+
+        const handle = new THREE.Mesh(
+            new THREE.BoxGeometry(0.1, 0.3, 0.1),
+            new THREE.MeshStandardMaterial({ color: 0x4a2511 })
+        );
+        handle.position.set(0, -0.15, 0.1);
+        gun.add(handle);
+
+        gun.position.set(0.3, -0.3, -0.5);
+        camera.add(gun);
+        scene.add(camera);
+    }
+
+    function spawnMonster() {
+        if (monsters.length >= MAX_MONSTERS || !modelsLoaded) return;
+
+        const modelKeys = Object.keys(loadedModels);
+        const randomKey = modelKeys[Math.floor(Math.random() * modelKeys.length)];
+        const modelTemplate = loadedModels[randomKey];
+
+        // Clone the model
+        const monsterGroup = modelTemplate.clone();
+
+        // Enable shadows on all meshes
+        monsterGroup.traverse((child) => {
+            if (child.isMesh) {
+                child.castShadow = true;
+                child.receiveShadow = true;
+            }
+        });
+
+        // Scale model
+        const scale = MONSTER_MODELS[randomKey].scale;
+        monsterGroup.scale.set(scale, scale, scale);
+
+        // Spawn position (30% close, 70% far)
+        let dist = Math.random() < 0.3 ? 5 + Math.random() * 5 : 20 + Math.random() * 30;
+        const angle = Math.random() * Math.PI * 2;
+
+        monsterGroup.position.set(
+            player.x + Math.cos(angle) * dist,
+            0,
+            player.z + Math.sin(angle) * dist
+        );
+
+        // Add glow light
+        const light = new THREE.PointLight(0xff0000, 1.5, 10);
+        light.position.y = 1;
+        monsterGroup.add(light);
+
+        monsterGroup.userData = {
+            health: MONSTER_HEALTH,
+            maxHealth: MONSTER_HEALTH,
+            type: MONSTER_MODELS[randomKey].name
+        };
+
+        scene.add(monsterGroup);
+        monsters.push(monsterGroup);
+    }
+
+    function setupEventListeners() {
         document.addEventListener('keydown', (e) => {
             keys[e.key.toLowerCase()] = true;
             if (e.code === 'Space' && gameStarted && !player.isJumping) {
@@ -273,193 +476,17 @@
         });
 
         document.getElementById('startBtn').addEventListener('click', startGame);
-        document.getElementById('restartBtn').addEventListener('click', () => {
-            location.reload();
-        });
+        document.getElementById('restartBtn').addEventListener('click', () => location.reload());
 
         window.addEventListener('resize', () => {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
         });
-
-        animate();
-    }
-
-    function createEnvironment() {
-        for (let i = 0; i < 40; i++) {
-            const trunk = new THREE.Mesh(
-                new THREE.CylinderGeometry(0.5, 0.5, 8, 8),
-                new THREE.MeshStandardMaterial({ color: 0x4a2511 })
-            );
-
-            const angle = Math.random() * Math.PI * 2;
-            const dist = Math.random() * 60 + 15;
-            trunk.position.set(
-                Math.cos(angle) * dist,
-                4,
-                Math.sin(angle) * dist
-            );
-            trunk.castShadow = true;
-            trunk.receiveShadow = true;
-            scene.add(trunk);
-
-            const leaves = new THREE.Mesh(
-                new THREE.SphereGeometry(3, 8, 8),
-                new THREE.MeshStandardMaterial({ color: 0x1a3a1a })
-            );
-            leaves.position.copy(trunk.position);
-            leaves.position.y = 9;
-            leaves.castShadow = true;
-            scene.add(leaves);
-        }
-
-        for (let i = 0; i < 20; i++) {
-            const rock = new THREE.Mesh(
-                new THREE.SphereGeometry(Math.random() * 1.5 + 0.5, 6, 6),
-                new THREE.MeshStandardMaterial({ color: 0x4a4a4a })
-            );
-            const angle = Math.random() * Math.PI * 2;
-            const dist = Math.random() * 50 + 10;
-            rock.position.set(
-                Math.cos(angle) * dist,
-                0.5,
-                Math.sin(angle) * dist
-            );
-            rock.castShadow = true;
-            rock.receiveShadow = true;
-            scene.add(rock);
-        }
-    }
-
-    function createGun() {
-        gun = new THREE.Group();
-
-        const barrel = new THREE.Mesh(
-            new THREE.CylinderGeometry(0.05, 0.05, 0.8, 8),
-            new THREE.MeshStandardMaterial({ color: 0x2a2a2a })
-        );
-        barrel.rotation.x = Math.PI / 2;
-        barrel.position.z = -0.4;
-        gun.add(barrel);
-
-        const handle = new THREE.Mesh(
-            new THREE.BoxGeometry(0.1, 0.3, 0.1),
-            new THREE.MeshStandardMaterial({ color: 0x4a2511 })
-        );
-        handle.position.set(0, -0.15, 0.1);
-        gun.add(handle);
-
-        const trigger = new THREE.Mesh(
-            new THREE.BoxGeometry(0.05, 0.1, 0.1),
-            new THREE.MeshStandardMaterial({ color: 0x1a1a1a })
-        );
-        trigger.position.set(0, -0.1, 0);
-        gun.add(trigger);
-
-        gun.position.set(0.3, -0.3, -0.5);
-        camera.add(gun);
-        scene.add(camera);
-    }
-
-    function createMonster(type) {
-        const monsterGroup = new THREE.Group();
-
-        // Body (taller humanoid shape)
-        const bodyGeo = new THREE.BoxGeometry(type.width, type.height, type.width * 0.6);
-        const bodyMat = new THREE.MeshStandardMaterial({
-            color: type.color,
-            roughness: 0.7
-        });
-        const body = new THREE.Mesh(bodyGeo, bodyMat);
-        body.position.y = type.height / 2;
-        body.castShadow = true;
-        monsterGroup.add(body);
-
-        // Head
-        const headSize = type.width * 0.5;
-        const head = new THREE.Mesh(
-            new THREE.BoxGeometry(headSize, headSize * 1.2, headSize),
-            new THREE.MeshStandardMaterial({
-                color: type.name === 'Pennywise' ? 0xffffff : type.color,
-                roughness: 0.8
-            })
-        );
-        head.position.y = type.height + headSize * 0.6;
-        head.castShadow = true;
-        monsterGroup.add(head);
-
-        // Eyes (glowing)
-        const eyeGeo = new THREE.SphereGeometry(0.08, 8, 8);
-        const eyeMat = new THREE.MeshStandardMaterial({
-            color: type.name === 'Pennywise' ? 0xff0000 : 0xffff00,
-            emissive: type.name === 'Pennywise' ? 0xff0000 : 0xffff00,
-            emissiveIntensity: 2
-        });
-
-        const leftEye = new THREE.Mesh(eyeGeo, eyeMat);
-        leftEye.position.set(-headSize * 0.3, type.height + headSize * 0.7, headSize * 0.5);
-        monsterGroup.add(leftEye);
-
-        const rightEye = new THREE.Mesh(eyeGeo, eyeMat);
-        rightEye.position.set(headSize * 0.3, type.height + headSize * 0.7, headSize * 0.5);
-        monsterGroup.add(rightEye);
-
-        // Arms
-        const armGeo = new THREE.BoxGeometry(type.width * 0.2, type.height * 0.6, type.width * 0.2);
-        const armMat = new THREE.MeshStandardMaterial({ color: type.color });
-
-        const leftArm = new THREE.Mesh(armGeo, armMat);
-        leftArm.position.set(-type.width * 0.6, type.height * 0.5, 0);
-        leftArm.castShadow = true;
-        monsterGroup.add(leftArm);
-
-        const rightArm = new THREE.Mesh(armGeo, armMat);
-        rightArm.position.set(type.width * 0.6, type.height * 0.5, 0);
-        rightArm.castShadow = true;
-        monsterGroup.add(rightArm);
-
-        // Ominous glow
-        const light = new THREE.PointLight(type.color, 1.5, 10);
-        light.position.y = type.height / 2;
-        monsterGroup.add(light);
-
-        return monsterGroup;
-    }
-
-    function spawnMonster() {
-        if (monsters.length >= MAX_MONSTERS) return;
-
-        const type = MONSTER_TYPES[Math.floor(Math.random() * MONSTER_TYPES.length)];
-        const monsterGroup = createMonster(type);
-
-        // 30% chance to spawn close for jumpscare
-        let dist;
-        if (Math.random() < 0.3) {
-            dist = 5 + Math.random() * 5; // Very close spawn!
-        } else {
-            dist = 20 + Math.random() * 30; // Normal spawn
-        }
-
-        const angle = Math.random() * Math.PI * 2;
-        monsterGroup.position.set(
-            player.x + Math.cos(angle) * dist,
-            0,
-            player.z + Math.sin(angle) * dist
-        );
-
-        monsterGroup.userData = {
-            health: MONSTER_HEALTH,
-            maxHealth: MONSTER_HEALTH,
-            type: type.name,
-            armSwing: 0
-        };
-
-        scene.add(monsterGroup);
-        monsters.push(monsterGroup);
     }
 
     function startGame() {
+        if (!modelsLoaded) return;
         gameStarted = true;
         document.getElementById('instructions').style.display = 'none';
         document.body.requestPointerLock();
@@ -481,8 +508,8 @@
 
         const monsterMeshes = [];
         monsters.forEach(m => {
-            m.children.forEach(child => {
-                if (child instanceof THREE.Mesh) {
+            m.traverse((child) => {
+                if (child.isMesh) {
                     monsterMeshes.push(child);
                 }
             });
@@ -491,16 +518,15 @@
         const intersects = raycaster.intersectObjects(monsterMeshes);
 
         if (intersects.length > 0) {
-            const hitMesh = intersects[0].object;
-            const monster = hitMesh.parent;
+            let hitObject = intersects[0].object;
+            let monster = hitObject;
+
+            while (monster.parent && !monster.userData.health) {
+                monster = monster.parent;
+            }
 
             if (monster.userData.health !== undefined) {
                 monster.userData.health -= SHOT_DAMAGE;
-
-                hitMesh.material.emissiveIntensity = 2;
-                setTimeout(() => {
-                    if (hitMesh.material) hitMesh.material.emissiveIntensity = 0.5;
-                }, 100);
 
                 if (monster.userData.health <= 0) {
                     killMonster(monster);
@@ -510,7 +536,7 @@
     }
 
     function killMonster(monster) {
-        let scale = 1;
+        let scale = monster.scale.x;
         const shrink = setInterval(() => {
             scale -= 0.1;
             monster.scale.set(scale, scale, scale);
@@ -527,7 +553,6 @@
     function updatePlayer() {
         const speed = 0.1;
 
-        // Calculate movement direction based on camera Y rotation only
         const moveForward = new THREE.Vector3();
         const moveRight = new THREE.Vector3();
 
@@ -556,7 +581,6 @@
             player.z -= moveRight.z * speed;
         }
 
-        // Jumping physics
         player.velocityY -= GRAVITY;
         player.y += player.velocityY;
 
@@ -566,11 +590,10 @@
             player.isJumping = false;
         }
 
-        // Update camera position and rotation separately
         camera.position.set(player.x, player.y, player.z);
         camera.rotation.y = cameraRotation.y;
         camera.rotation.x = cameraRotation.x;
-        camera.rotation.z = 0; // Keep camera level
+        camera.rotation.z = 0;
     }
 
     function updateMonsters() {
@@ -581,15 +604,6 @@
 
             monster.position.x += (dx / dist) * MONSTER_SPEED;
             monster.position.z += (dz / dist) * MONSTER_SPEED;
-
-            // Swing arms while moving
-            monster.userData.armSwing += 0.1;
-            if (monster.children[3]) { // Left arm
-                monster.children[3].rotation.x = Math.sin(monster.userData.armSwing) * 0.5;
-            }
-            if (monster.children[4]) { // Right arm
-                monster.children[4].rotation.x = Math.sin(monster.userData.armSwing + Math.PI) * 0.5;
-            }
 
             monster.lookAt(player.x, monster.position.y, player.z);
 
